@@ -7,6 +7,12 @@
  * to access the Adobe Connect API
  */
 
+/**
+ * @package mod
+ * @subpackage adobeconnect
+ * @author Akinsaya Delamarre (adelamarre@remote-learner.net)
+ * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ */
 class connect_class {
     var $_serverurl;
     var $_serverport;
@@ -22,6 +28,7 @@ class connect_class {
     public function __construct($serverurl = '', $serverport = 80,
                                 $username = '', $password = '',
                                 $cookie = '', $https = false) {
+
         $this->_serverurl = $serverurl;
         $this->_serverport = $serverport;
         $this->_username = $username;
@@ -89,12 +96,12 @@ class connect_class {
         return $this->_serverport;
     }
 
-    public function get_https() {
-        return $this->_https;
-    }
-
     private function get_deafult_header() {
         return array('Content-Type: text/xml');
+    }
+
+    public function get_https() {
+        return $this->_https;
     }
 
     /**
@@ -116,6 +123,7 @@ class connect_class {
         return $serverurl;
     }
 
+
     /**
      * Posts XML to the Adobe Connect server and returns the results
      * @param int $return_header 1 to include the response header, 0 to not
@@ -136,25 +144,30 @@ class connect_class {
             $serverurl = $this->make_https();
         }
 
+
         if ($stop) {
 //            echo $this->_serverurl . '?session='. $this->_cookie; die();
 //            https://example.com/api/xml?action=principal=list
             curl_setopt($ch, CURLOPT_URL, $serverurl/* . '?action=login&external-auth=use'*/);
+
         } else {
+
             $querystring = (!empty($this->_cookie)) ?  '?session='. $this->_cookie : '';
             curl_setopt($ch, CURLOPT_URL, $serverurl . $querystring);
+
         }
 
 
-        // Connect through a proxy if Moodle config says we should
-        if(isset($CFG->proxyhost)) {
+       // Connect through a proxy if Moodle config says we should
+       if(isset($CFG->proxyhost)) {
 
-            curl_setopt($ch, CURLOPT_PROXY, $CFG->proxyhost);
+           curl_setopt($ch, CURLOPT_PROXY, $CFG->proxyhost);
 
-            if (isset($CFG->proxyport)) {
-                curl_setopt($ch, CURLOPT_PROXYPORT, $CFG->proxyport);
-            }
-        }
+           if(isset($CFG->proxyport)) {
+
+               curl_setopt($ch, CURLOPT_PROXYPORT, $CFG->proxyport);
+           }
+       }
 
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
         curl_setopt($ch, CURLOPT_POSTFIELDS, $this->_xmlrequest);
@@ -376,5 +389,3 @@ class connect_class {
 
     }
 }
-
-?>

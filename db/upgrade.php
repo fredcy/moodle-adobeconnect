@@ -1,4 +1,4 @@
-<?php  //$Id: upgrade.php,v 1.1.2.6 2011/07/21 22:33:36 adelamarre Exp $
+<?php  //$Id: upgrade.php,v 1.7.2.1 2011/07/21 22:46:29 adelamarre Exp $
 
 // This file keeps track of upgrades to
 // the adobeconnect module
@@ -17,39 +17,60 @@
 // The commands in here will all be database-neutral,
 // using the functions defined in lib/ddllib.php
 
+/**
+ * @package mod
+ * @subpackage adobeconnect
+ * @author Akinsaya Delamarre (adelamarre@remote-learner.net)
+ * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ */
+
 function xmldb_adobeconnect_upgrade($oldversion=0) {
 
-    global $CFG, $THEME, $db;
+    global $CFG, $DB;
 
-    $result = true;
+    $dbman = $DB->get_manager();
 
-    if ($result && $oldversion < 2011050301) { //New version in version.php
-        $table = new XMLDBTable('adobeconnect');
+//===== 1.9.0 upgrade line ======//
+    if ($oldversion < 2010120800) {
 
-        $field = new XMLDBField('meeturl');
-        $field->setAttributes(XMLDB_TYPE_CHAR, '60', null, XMLDB_NOTNULL, null, null, null, '0', 'templatescoid');
+    /// Define field introformat to be added to survey
+        $table = new xmldb_table('adobeconnect');
+        $field = new xmldb_field('introformat', XMLDB_TYPE_INTEGER, '4', XMLDB_UNSIGNED, XMLDB_NOTNULL, null, '0', 'intro');
 
-
-        $result  = $result && change_field_precision($table, $field);
-    }
-
-    if ($result && $oldversion < 2011050302) {
-
-        if (!record_exists('log_display', 'module', 'adobeconnect',
-                           'action', 'join meeting', 'field', 'name')) {
-
-            $newaction = new stdClass();
-            $newaction->module  = 'adobeconnect';
-            $newaction->action  = 'join meeting';
-            $newaction->field   = 'name';
-            $newaction->mtable  = 'adobeconnect';
-
-            $result = $result && insert_record('log_display', $newaction);
+    /// Conditionally launch add field introformat
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
         }
+
+        // conditionally migrate to html format in intro
+        if ($CFG->texteditors !== 'textarea') {
+            $rs = $DB->get_recordset('adobeconnect', array('introformat'=>FORMAT_MOODLE), '', 'id,intro,introformat');
+            foreach ($rs as $s) {
+                $s->intro       = text_to_html($s->intro, false, false, true);
+                $s->introformat = FORMAT_HTML;
+                $DB->update_record('adobeconnect', $s);
+                upgrade_set_timeout();
+            }
+            $rs->close();
+        }
+
+    /// adobeconnect savepoint reached
+        upgrade_mod_savepoint(true, 2010120800, 'adobeconnect');
     }
 
+    if ($oldversion < 2011041400) {
 
-    return $result;
+        // Changing precision of field meeturl on table adobeconnect to (60)
+        $table = new xmldb_table('adobeconnect');
+        $field = new xmldb_field('meeturl', XMLDB_TYPE_CHAR, '60', null, null, null, null, 'templatescoid');
+
+        // Launch change of precision for field meeturl
+        $dbman->change_field_precision($table, $field);
+
+        // adobeconnect savepoint reached
+        upgrade_mod_savepoint(true, 2011041400, 'adobeconnect');
+    }
+
+    return true;
+
 }
-
-?>

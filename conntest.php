@@ -1,47 +1,99 @@
-<?php // $Id: conntest.php,v 1.1.2.7 2011/07/21 22:33:35 adelamarre Exp $
+<?php
+/**
+ * @package mod
+ * @subpackage adobeconnect
+ * @author Akinsaya Delamarre (adelamarre@remote-learner.net)
+ * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ */
+    //defined('MOODLE_INTERNAL') || die;
 
     require_once(dirname(dirname(dirname(__FILE__))) . '/config.php');
     require_once(dirname(__FILE__) . '/locallib.php');
+    require_once(dirname(dirname(dirname(__FILE__))) . '/lib/accesslib.php');
 
     require_login(SITEID, false);
 
-    if (!isadmin()) {
-        redirect($CFG->wwwroot);
+    global $USER, $CFG, $DB, $OUTPUT;
+
+    $checkifempty = true; // Check for uninitialized variable
+
+    $url = new moodle_url('/mod/adobeconnect/conntest.php');
+    $PAGE->set_url($url);
+
+    $admins = explode(',', $CFG->siteadmins);
+
+    if (false === array_search($USER->id, $admins)) {
+        print_error('error1', 'adobeconnect', $CFG->wwwroot);
     }
 
-    if (!$site = get_site()) {
-        redirect($CFG->wwwroot);
+    $ac = new stdClass();
+
+    $param = array('name' => 'adobeconnect_admin_login');
+    $ac->login      = $DB->get_field('config', 'value', $param);
+
+    $param = array('name' => 'adobeconnect_host');
+    $ac->host       = $DB->get_field('config', 'value', $param);
+
+    $param = array('name' => 'adobeconnect_port');
+    $ac->port       = $DB->get_field('config', 'value', $param);
+
+    $param = array('name' => 'adobeconnect_admin_password');
+    $ac->pass       = $DB->get_field('config', 'value', $param);
+
+    $param = array('name' => 'adobeconnect_admin_httpauth');
+    $ac->httpauth   = $DB->get_field('config', 'value', $param);
+
+    $param = array('name' => 'adobeconnect_email_login');
+    $ac->emaillogin = $DB->get_field('config', 'value', $param);
+
+    $param = array('name' => 'adobeconnect_https');
+    $ac->https = $DB->get_field('config', 'value', $param);
+
+    foreach ($ac as $propertyname => $propertyvalue) {
+
+        // Check if the property is equal to email login or https check boxes
+        // These are the only values allowed to be empty
+        $isnotemaillogin   = strcmp($propertyname, 'emaillogin');
+        $isnothttps        = strcmp($propertyname, 'https');
+
+        $checkifempty = $isnotemaillogin && $isnothttps;
+
+        // If this property is empty
+        if ($checkifempty and empty($propertyvalue)) {
+            print_error('error2', 'adobeconnect', '', $propertyname);
+            die();
+        }
+
     }
 
-    $serverhost = required_param('serverURL', PARAM_NOTAGS);
-    $port       = optional_param('port', 80, PARAM_INT);
-    $username   = required_param('authUsername', PARAM_NOTAGS);
-    $password   = required_param('authPassword', PARAM_NOTAGS);
-    $httpheader = required_param('authHTTPheader', PARAM_NOTAGS);
-    $emaillogin = required_param('authEmaillogin', PARAM_INT);
-    $https      = optional_param('authHTTPS', 'false', PARAM_ALPHA);
+    $strtitle = get_string('connectiontesttitle', 'adobeconnect');
 
-    if (false === strpos($https, 'false')) {
+    $systemcontext = get_context_instance(CONTEXT_SYSTEM);
+    $PAGE->set_context($systemcontext);
+    $PAGE->set_title($strtitle);
+    //$PAGE->set_heading($strtitle);
+
+    echo $OUTPUT->header();
+    echo $OUTPUT->box_start('center');
+
+    $param = new stdClass();
+    $param->url = 'http://docs.moodle.org/en/Remote_learner_adobe_connect_pro';
+    print_string('conntestintro', 'adobeconnect', $param);
+
+    if (!empty($ac->https)) {
         $https = true;
     } else {
         $https = false;
     }
 
-    $strtitle = get_string('connectiontesttitle', 'adobeconnect');
-
-
-    print_header_simple(format_string($strtitle));
-    print_simple_box_start('center', '100%');
-
-    print_string('conntestintro', 'adobeconnect');
-
-    adobe_connection_test($serverhost, $port, $username, $password, $httpheader, $emaillogin, $https);
+    adobe_connection_test($ac->host, $ac->port, $ac->login,
+                          $ac->pass, $ac->httpauth,
+                          $ac->emaillogin, $ac->https);
 
     echo '<center>'. "\n";
     echo '<input type="button" onclick="self.close();" value="' . get_string('closewindow') . '" />';
     echo '</center>';
 
-    print_simple_box_end();
-    print_footer('none');
+    echo $OUTPUT->box_end();
 
-?>
+    //echo $OUTPUT->footer();

@@ -101,5 +101,3 @@ $string['unableretrdetails'] = 'Impossibile reperire i dettagli per questa riuni
 $string['usernotenrolled'] = 'Solo gli utenti iscritti al corso possono partecipare alle riunioni'; // join.php 'Only users enrolled and have a role in this course can join this meeting'
 $string['nopresenterrole'] = 'Il ruolo Adobe Presenter non &egrave definito nel sistema: segnalate all\' amministratore il problema.'; // view.php 'error: error finding adobeconnectpresenter role'
 $string['nomeeting'] = 'La riunione richiesta non esiste sul server'; // view.php 'No meeting exists on the server'
-
-?>

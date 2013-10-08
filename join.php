@@ -1,13 +1,11 @@
-<?php // $Id: join.php,v 1.1.2.11 2011/07/21 22:33:35 adelamarre Exp $
+<?php
 
 /**
- * This page prints a particular instance of adobeconnect
- *
- * @author  Your Name <adelamarre@remote-learner.net>
- * @version $Id: join.php,v 1.1.2.11 2011/07/21 22:33:35 adelamarre Exp $
- * @package mod/adobeconnect
+ * @package mod
+ * @subpackage adobeconnect
+ * @author Akinsaya Delamarre (adelamarre@remote-learner.net)
+ * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-
 
 require_once(dirname(dirname(dirname(__FILE__))).'/config.php');
 require_once(dirname(__FILE__).'/locallib.php');
@@ -18,21 +16,24 @@ $id       = required_param('id', PARAM_INT); // course_module ID, or
 $groupid  = required_param('groupid', PARAM_INT);
 $sesskey  = required_param('sesskey', PARAM_ALPHANUM);
 
+
+global $CFG, $USER, $DB;
+
 if (! $cm = get_coursemodule_from_id('adobeconnect', $id)) {
     error('Course Module ID was incorrect');
 }
 
-if (! $course = get_record('course', 'id', $cm->course)) {
+$cond = array('id' => $cm->course);
+if (! $course = $DB->get_record('course', $cond)) {
     error('Course is misconfigured');
 }
 
-if (! $adobeconnect = get_record('adobeconnect', 'id', $cm->instance)) {
+$cond = array('id' => $cm->instance);
+if (! $adobeconnect = $DB->get_record('adobeconnect', $cond)) {
     error('Course module is incorrect');
 }
 
 require_login($course, true, $cm);
-
-global $CFG, $USER;
 
 // Check if the user's email is the Connect Pro user's login
 $usrobj = new stdClass();
@@ -98,8 +99,8 @@ if ($usrcanjoin and confirm_sesskey($sesskey)) {
     $groupobj = groups_get_group($groupid);
 
     // Get the meeting sco-id
-    $meetingscoid = get_field('adobeconnect_meeting_groups', 'meetingscoid',
-                              'instanceid', $cm->instance, 'groupid', $groupid);
+    $param = array('instanceid' => $cm->instance, 'groupid' => $groupid);
+    $meetingscoid = $DB->get_field('adobeconnect_meeting_groups', 'meetingscoid', $param);
 
     $aconnect = aconnect_login();
 
@@ -119,7 +120,6 @@ if ($usrcanjoin and confirm_sesskey($sesskey)) {
             print_object($aconnect->_xmlresponse);
             $validuser = false;
         }
-
     }
 
     $context = get_context_instance(CONTEXT_MODULE, $id);
@@ -197,6 +197,7 @@ if ($usrcanjoin and confirm_sesskey($sesskey)) {
 
         $aconnect = new connect_class_dom($CFG->adobeconnect_host, $CFG->adobeconnect_port,
                                           '', '', '', $https);
+
         $aconnect->request_http_header_login(1, $login);
 
         // Include the port number only if it is a port other than 80
@@ -207,7 +208,8 @@ if ($usrcanjoin and confirm_sesskey($sesskey)) {
         }
 
         add_to_log($course->id, 'adobeconnect', 'join meeting',
-                   "join.php?id=$cm->id&groupid=$groupid&sesskey=$sesskey", "Join meeting {$adobeconnect->name}", $cm->id);
+                   "join.php?id=$cm->id&groupid=$groupid&sesskey=$sesskey",
+                   "Joined $adobeconnect->name meeting", $cm->id);
 
         redirect($protocol . $CFG->adobeconnect_meethost . $port
                  . $meeting->url
@@ -216,4 +218,3 @@ if ($usrcanjoin and confirm_sesskey($sesskey)) {
 } else {
     notice(get_string('usernotenrolled', 'adobeconnect'));
 }
-?>

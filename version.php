@@ -1,16 +1,12 @@
-<?php // $Id: version.php,v 1.1.2.20 2011/09/23 16:38:21 mchurch Exp $
+<?php // $Id: version.php,v 1.14.2.1 2011/07/21 22:46:30 adelamarre Exp $
 
 /**
- * Code fragment to define the version of adobeconnect
- * This fragment is called by moodle_needs_upgrading() and /admin/index.php
- *
- * @author  Akinsaya Delamarre adelamarre@remote-learner.net
- * @version $Id: version.php,v 1.1.2.20 2011/09/23 16:38:21 mchurch Exp $
- * @package mod/adobeconnect
+ * @package mod
+ * @subpackage adobeconnect
+ * @author Akinsaya Delamarre (adelamarre@remote-learner.net)
+ * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-$module->version  = 2011072100;  // The current module version (Date: YYYYMMDDXX)
-$module->requires = 2007101509;  // Requires this Moodle version
+$module->version  = 2011072120;  // The current module version (Date: YYYYMMDDXX)
+$module->requires  = 2010120700; // Requires this Moodle version
 $module->cron     = 0;           // Period for cron to check this module (secs)
-
-?>

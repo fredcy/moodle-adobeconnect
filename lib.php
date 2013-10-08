@@ -1,4 +1,10 @@
-<?php  // $Id: lib.php,v 1.1.2.10 2011/07/21 22:33:36 adelamarre Exp $
+<?php  // $Id: lib.php,v 1.9.2.1 2011/07/21 22:46:30 adelamarre Exp $
+/**
+ * @package mod
+ * @subpackage adobeconnect
+ * @author Akinsaya Delamarre (adelamarre@remote-learner.net)
+ * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ */
 
 require_once('locallib.php');
 
@@ -17,10 +23,39 @@ require_once('locallib.php');
  *     actions across all modules.
  */
 
-/// (replace adobeconnect with the name of your module and delete this line)
+$adobeconnect_EXAMPLE_CONSTANT = 42;
 
-$adobeconnect_EXAMPLE_CONSTANT = 42;     /// for example
+/** Include eventslib.php */
+require_once($CFG->libdir.'/eventslib.php');
+/** Include calendar/lib.php */
+require_once($CFG->dirroot.'/calendar/lib.php');
 
+
+/**
+ * @uses FEATURE_GROUPS
+ * @uses FEATURE_GROUPINGS
+ * @uses FEATURE_GROUPMEMBERSONLY
+ * @uses FEATURE_MOD_INTRO
+ * @uses FEATURE_COMPLETION_TRACKS_VIEWS
+ * @uses FEATURE_GRADE_HAS_GRADE
+ * @uses FEATURE_GRADE_OUTCOMES
+ * @param string $feature FEATURE_xx constant for requested feature
+ * @return mixed True if module supports feature, false if not, null if doesn't know
+ */
+function adobeconnect_supports($feature) {
+    switch($feature) {
+        case FEATURE_GROUPS:                  return true;
+        case FEATURE_GROUPINGS:               return true;
+        case FEATURE_GROUPMEMBERSONLY:        return true;
+        case FEATURE_MOD_INTRO:               return true;
+        case FEATURE_COMPLETION_TRACKS_VIEWS: return false;
+        case FEATURE_GRADE_HAS_GRADE:         return false;
+        case FEATURE_GRADE_OUTCOMES:          return false;
+        case FEATURE_BACKUP_MOODLE2:          return true;
+
+        default: return null;
+    }
+}
 
 /**
  * Given an object containing all the necessary data,
@@ -32,8 +67,7 @@ $adobeconnect_EXAMPLE_CONSTANT = 42;     /// for example
  * @return int The id of the newly inserted adobeconnect record
  */
 function adobeconnect_add_instance($adobeconnect) {
-
-    global $COURSE, $USER;
+    global $COURSE, $USER, $DB;
 
     $adobeconnect->timecreated  = time();
     $adobeconnect->meeturl      = adobeconnect_clean_meet_url($adobeconnect->meeturl);
@@ -45,16 +79,18 @@ function adobeconnect_add_instance($adobeconnect) {
     $context = get_context_instance(CONTEXT_COURSE, $adobeconnect->course);
 
     if (!has_capability('mod/adobeconnect:meetinghost', $context, $USER->id, false)) {
-        $roleid = get_field('role', 'id', 'shortname', 'adobeconnecthost');
 
-        if (role_assign($roleid, $USER->id, 0, $context->id)) {
+        $param = array('shortname' => 'adobeconnecthost');
+        $roleid = $DB->get_field('role', 'id', $param);
+
+        if (role_assign($roleid, $USER->id, $context->id, 'mod_adobeconnect')) {
             //DEBUG
         } else {
             echo 'role assignment failed'; die();
         }
     }
 
-    $recid = insert_record('adobeconnect', $adobeconnect);
+    $recid = $DB->insert_record('adobeconnect', $adobeconnect);
 
     if (empty($recid)) {
         return false;
@@ -71,19 +107,22 @@ function adobeconnect_add_instance($adobeconnect) {
         $crsgroups = groups_get_all_groups($COURSE->id);
 
         if (empty($crsgroups)) {
-            return;
+            return 0;
         }
 
+        require_once(dirname(dirname(dirname(__FILE__))).'/group/lib.php');
         // Create the meeting for each group
         foreach($crsgroups as $crsgroup) {
 
             // The teacher role if they don't already have one and
             // Assign them to each group
             if (!groups_is_member($crsgroup->id, $USER->id)) {
-                $roleid = get_field('role', 'id', 'shortname', 'editingteacher');
+
+                $param = array('shortname' => 'editingteacher');
+                $roleid = $DB->get_field('role', 'id', $param);
 
                 if (!user_has_role_assignment($USER->id, $roleid, $context->id)) {
-                    role_assign($roleid, $USER->id, 0, $context->id);
+                    role_assign($roleid, $USER->id, $context->id, 'mod_adobeconnect');
                 }
 
                 groups_add_member($crsgroup->id, $USER->id);
@@ -107,31 +146,31 @@ function adobeconnect_add_instance($adobeconnect) {
                 aconnect_update_meeting_perm($aconnect, $meetingscoid, ADOBE_MEETPERM_PUBLIC);
             }
 
+
             // Insert record to activity instance in meeting_groups table
             $record = new stdClass;
             $record->instanceid = $recid;
             $record->meetingscoid = $meetingscoid;
             $record->groupid = $crsgroup->id;
 
-            $record->id = insert_record('adobeconnect_meeting_groups', $record);
+            $record->id = $DB->insert_record('adobeconnect_meeting_groups', $record);
 
             // Add event to calendar
             $event = new stdClass();
 
             $event->name = $meeting->name;
-            $event->description = $adobeconnect->intro;
-            $event->format = 1;
+            $event->description = format_module_intro('adobeconnect', $adobeconnect, $adobeconnect->coursemodule);
             $event->courseid = $adobeconnect->course;
             $event->groupid = $crsgroup->id;
             $event->userid = 0;
             $event->instance = $recid;
-            $event->eventtype = '';
+            $event->eventtype = 'group';
             $event->timestart = $adobeconnect->starttime;
             $event->timeduration = $adobeconnect->endtime - $adobeconnect->starttime;
             $event->visible = 1;
             $event->modulename = 'adobeconnect';
 
-            add_event($event);
+            calendar_event::create($event);
 
         }
 
@@ -151,25 +190,24 @@ function adobeconnect_add_instance($adobeconnect) {
         $record->meetingscoid = $meetingscoid;
         $record->groupid = 0;
 
-        $record->id = insert_record('adobeconnect_meeting_groups', $record);
+        $record->id = $DB->insert_record('adobeconnect_meeting_groups', $record);
 
         // Add event to calendar
         $event = new stdClass();
 
         $event->name = $meeting->name;
-        $event->description = $adobeconnect->intro;
-        $event->format = 1;
+        $event->description = format_module_intro('adobeconnect', $adobeconnect, $adobeconnect->coursemodule);
         $event->courseid = $adobeconnect->course;
         $event->groupid = 0;
         $event->userid = 0;
         $event->instance = $recid;
-        $event->eventtype = '';
+        $event->eventtype = 'course';
         $event->timestart = $adobeconnect->starttime;
         $event->timeduration = $adobeconnect->endtime - $adobeconnect->starttime;
         $event->visible = 1;
         $event->modulename = 'adobeconnect';
 
-        add_event($event);
+        calendar_event::create($event);
 
     }
 
@@ -182,21 +220,14 @@ function adobeconnect_add_instance($adobeconnect) {
         if (!empty($meeting)) {
             $meeting = current($meeting);
 
-        $record = new stdClass();
-        $record->id = $recid;
-        $record->meeturl = trim($meeting->url, '/');
-        update_record('adobeconnect', $record);
-    }
+            $record = new stdClass();
+            $record->id = $recid;
+            $record->meeturl = trim($meeting->url, '/');
+            $DB->update_record('adobeconnect', $record);
+        }
     }
 
     aconnect_logout($aconnect);
-//    $crsgroups = groups_get_course_group($COURSE);
-//    print_object($adobeconnect);
-//    print_object('---');
-//    print_object($crsgroups);
-//    print_object('---');
-//    print_object($COURSE);
-//    die();
 
     return $recid;
 }
@@ -211,6 +242,7 @@ function adobeconnect_add_instance($adobeconnect) {
  * @return boolean Success/Fail
  */
 function adobeconnect_update_instance($adobeconnect) {
+    global $DB;
 
     $adobeconnect->timemodified = time();
     $adobeconnect->id = $adobeconnect->instance;
@@ -246,7 +278,8 @@ function adobeconnect_update_instance($adobeconnect) {
     $url = adobeconnect_clean_meet_url($url);
 
     // Get all instances of the activity meetings
-    $grpmeetings = get_records('adobeconnect_meeting_groups', 'instanceid', $adobeconnect->instance);
+    $param = array('instanceid' => $adobeconnect->instance);
+    $grpmeetings = $DB->get_records('adobeconnect_meeting_groups', $param);
 
     if (empty($grpmeetings)) {
         $grpmeetings = array();
@@ -325,35 +358,37 @@ function adobeconnect_update_instance($adobeconnect) {
             }
 
             // Update calendar event
-            $eventid = get_field('event', 'id', 'courseid', $adobeconnect->course,
-                                 'instance', $adobeconnect->id, 'groupid', $grpmeeting->groupid);
+            $param = array('courseid' => $adobeconnect->course, 'instance' =>
+                           $adobeconnect->id, 'groupid' => $grpmeeting->groupid,
+                           'modulename' => 'adobeconnect');
+
+            $eventid = $DB->get_field('event', 'id', $param);
 
             if (!empty($eventid)) {
+
                 $event = new stdClass();
                 $event->id = $eventid;
                 $event->name = $meetingobj->name;
-                $event->description = $adobeconnect->intro;
-                $event->format = 1;
+                $event->description = format_module_intro('adobeconnect', $adobeconnect, $adobeconnect->coursemodule);
                 $event->courseid = $adobeconnect->course;
                 $event->groupid = $grpmeeting->groupid;
                 $event->userid = 0;
                 $event->instance = $adobeconnect->id;
-                $event->eventtype = '';
+                $event->eventtype = 0 == $grpmeeting->groupid ? 'course' : 'group';
                 $event->timestart = $adobeconnect->starttime;
                 $event->timeduration = $adobeconnect->endtime - $adobeconnect->starttime;
                 $event->visible = 1;
                 $event->modulename = 'adobeconnect';
 
-                update_event($event);
+                $calendarevent = calendar_event::load($eventid);
+                $calendarevent->update($event);
             }
         }
     }
 
-
-
     aconnect_logout($aconnect);
 
-    return update_record('adobeconnect', $adobeconnect);
+    return $DB->update_record('adobeconnect', $adobeconnect);
 }
 
 
@@ -366,25 +401,30 @@ function adobeconnect_update_instance($adobeconnect) {
  * @return boolean Success/Failure
  */
 function adobeconnect_delete_instance($id) {
+    global $DB;
 
-    if (! $adobeconnect = get_record('adobeconnect', 'id', $id)) {
+    $param = array('id' => $id);
+    if (! $adobeconnect = $DB->get_record('adobeconnect', $param)) {
         return false;
     }
 
     $result = true;
 
     // Remove meeting from Adobe connect server
-    $adbmeetings = get_records('adobeconnect_meeting_groups', 'instanceid', $adobeconnect->id);
+    $param = array('instanceid' => $adobeconnect->id);
+    $adbmeetings = $DB->get_records('adobeconnect_meeting_groups', $param);
 
     if (!empty($adbmeetings)) {
         $aconnect = aconnect_login();
         foreach ($adbmeetings as $meeting) {
             // Update calendar event
-            $eventid = get_field('event', 'id', 'courseid', $adobeconnect->course,
-                                 'instance', $adobeconnect->id, 'groupid', $meeting->groupid);
+            $param = array('courseid' => $adobeconnect->course, 'instance' => $adobeconnect->id,
+                           'groupid' => $meeting->groupid, 'modulename' => 'adobeconnect');
+            $eventid = $DB->get_field('event', 'id', $param);
 
             if (!empty($eventid)) {
-                delete_event($eventid);
+                $event = calendar_event::load($eventid);
+                $event->delete();
             }
 
             aconnect_remove_meeting($aconnect, $meeting->meetingscoid);
@@ -393,8 +433,11 @@ function adobeconnect_delete_instance($id) {
         aconnect_logout($aconnect);
     }
 
-    $result &= delete_records('adobeconnect', 'id', $adobeconnect->id);
-    $result &= delete_records('adobeconnect_meeting_groups', 'instanceid', $adobeconnect->id);
+    $param = array('id' => $adobeconnect->id);
+    $result &= $DB->delete_records('adobeconnect', $param);
+
+    $param = array('instanceid' => $adobeconnect->id);
+    $result &= $DB->delete_records('adobeconnect_meeting_groups', $param);
 
     return $result;
 }
@@ -499,136 +542,19 @@ function adobeconnect_scale_used($adobeconnectid, $scaleid) {
  * @return boolean True if the scale is used by any adobeconnect
  */
 function adobeconnect_scale_used_anywhere($scaleid) {
-    if ($scaleid and record_exists('adobeconnect', 'grade', -$scaleid)) {
+    global $DB;
+
+    $param = array('grade' => $scaleid);
+    if ($scaleid and $DB->record_exists('adobeconnect', $param)) {
         return true;
     } else {
         return false;
     }
 }
 
-
 /**
- * Execute post-install custom actions for the module
- * This function was added in 1.9
- *
- * @return boolean true if success, false on error
- */
-function adobeconnect_install() {
-    $result = true;
-    $timenow = time();
-    $sysctx  = get_context_instance(CONTEXT_SYSTEM);
-
-//    $adminrid          = get_field('role', 'id', 'shortname', 'admin');
-    $coursecreatorrid  = get_field('role', 'id', 'shortname', 'coursecreator');
-    $editingteacherrid = get_field('role', 'id', 'shortname', 'editingteacher');
-    $teacherrid        = get_field('role', 'id', 'shortname', 'teacher');
-
-/// Fully setup the Adobe Connect Presenter role.
-    if ($result && !$mrole = get_record('role', 'shortname', 'adobeconnectpresenter')) {
-        if ($rid = create_role(get_string('adobeconnectpresenter', 'adobeconnect'), 'adobeconnectpresenter',
-                               get_string('adobeconnectpresenterdescription', 'adobeconnect'))) {
-
-            $mrole  = get_record('role', 'id', $rid);
-            $result = $result && assign_capability('mod/adobeconnect:meetingpresenter', CAP_ALLOW, $mrole->id, $sysctx->id);
-        } else {
-            $result = false;
-        }
-    }
-
-    if (!get_field('role_allow_assign', 'id', 'allowassign', $mrole->id, 'roleid', $coursecreatorrid)) {
-        $result = $result && allow_assign($coursecreatorrid, $mrole->id);
-    }
-
-    if (!get_field('role_allow_assign', 'id', 'allowassign', $mrole->id, 'roleid', $editingteacherrid)) {
-        $result = $result && allow_assign($editingteacherrid, $mrole->id);
-    }
-
-    if (!get_field('role_allow_assign', 'id', 'allowassign', $mrole->id, 'roleid', $teacherrid)) {
-        $result = $result && allow_assign($teacherrid, $mrole->id);
-    }
-
-/// Fully setup the Adobe Connect Participant role.
-    if ($result && !$mrole = get_record('role', 'shortname', 'adobeconnectparticipant')) {
-        if ($rid = create_role(get_string('adobeconnectparticipant', 'adobeconnect'), 'adobeconnectparticipant',
-                               get_string('adobeconnectparticipantdescription', 'adobeconnect'))) {
-
-            $mrole  = get_record('role', 'id', $rid);
-            $result = $result && assign_capability('mod/adobeconnect:meetingparticipant', CAP_ALLOW, $mrole->id, $sysctx->id);
-        } else {
-            $result = false;
-        }
-    }
-
-    if (!get_field('role_allow_assign', 'id', 'allowassign', $mrole->id, 'roleid', $coursecreatorrid)) {
-        $result = $result && allow_assign($coursecreatorrid, $mrole->id);
-    }
-
-    if (!get_field('role_allow_assign', 'id', 'allowassign', $mrole->id, 'roleid', $editingteacherrid)) {
-        $result = $result && allow_assign($editingteacherrid, $mrole->id);
-    }
-
-    if (!get_field('role_allow_assign', 'id', 'allowassign', $mrole->id, 'roleid', $teacherrid)) {
-        $result = $result && allow_assign($teacherrid, $mrole->id);
-    }
-
-
-/// Fully setup the Adobe Connect Host role.
-    if ($result && !$mrole = get_record('role', 'shortname', 'adobeconnecthost')) {
-        if ($rid = create_role(get_string('adobeconnecthost', 'adobeconnect'), 'adobeconnecthost',
-                               get_string('adobeconnecthostdescription', 'adobeconnect'))) {
-
-            $mrole  = get_record('role', 'id', $rid);
-            $result = $result && assign_capability('mod/adobeconnect:meetinghost', CAP_ALLOW, $mrole->id, $sysctx->id);
-        } else {
-            $result = false;
-        }
-    }
-
-    if (!get_field('role_allow_assign', 'id', 'allowassign', $mrole->id, 'roleid', $coursecreatorrid)) {
-        $result = $result && allow_assign($coursecreatorrid, $mrole->id);
-    }
-
-    if (!get_field('role_allow_assign', 'id', 'allowassign', $mrole->id, 'roleid', $editingteacherrid)) {
-        $result = $result && allow_assign($editingteacherrid, $mrole->id);
-    }
-
-    if (!get_field('role_allow_assign', 'id', 'allowassign', $mrole->id, 'roleid', $teacherrid)) {
-        $result = $result && allow_assign($teacherrid, $mrole->id);
-    }
-
-    return $result;
-}
-
-
-/**
- * Execute post-uninstall custom actions for the module
- * This function was added in 1.9
- *
- * @return boolean true if success, false on error
- */
-function adobeconnect_uninstall() {
-    $result = true;
-
-    if ($mrole = get_record('role', 'shortname', 'adobeconnectparticipant')) {
-        $result = $result && delete_role($mrole->id);
-        $result = $result && delete_records('role_allow_assign', 'allowassign', $mrole->id);
-    }
-
-    if ($prole = get_record('role', 'shortname', 'adobeconnectpresenter')) {
-        $result = $result && delete_role($prole->id);
-        $result = $result && delete_records('role_allow_assign', 'allowassign', $prole->id);
-    }
-
-    if ($prole = get_record('role', 'shortname', 'adobeconnecthost')) {
-        $result = $result && delete_role($prole->id);
-        $result = $result && delete_records('role_allow_assign', 'allowassign', $prole->id);
-    }
-
-    return $result;
-}
-
-/**
- * Meeting URLs need to start with an alpha then be alphanumeric or hyphen('-')
+ * Meeting URLs need to start with an alpha then be alphanumeric
+ * or hyphen('-')
  *
  * @param string $meeturl Incoming URL
  * @return string cleaned URL
@@ -637,4 +563,3 @@ function adobeconnect_clean_meet_url($meeturl) {
     $meeturl = preg_replace ('/[^a-z0-9]/i', '-', $meeturl);
     return $meeturl;
 }
-?>

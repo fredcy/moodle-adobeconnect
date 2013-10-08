@@ -1,11 +1,10 @@
-<?php  // $Id: view.php,v 1.1.2.14 2011/07/21 22:33:34 adelamarre Exp $
+<?php
 
 /**
- * This page prints a particular instance of adobeconnect
- *
- * @author  Your Name <adelamarre@remote-learner.net>
- * @version $Id: view.php,v 1.1.2.14 2011/07/21 22:33:34 adelamarre Exp $
- * @package mod/adobeconnect
+ * @package mod
+ * @subpackage adobeconnect
+ * @author Akinsaya Delamarre (adelamarre@remote-learner.net)
+ * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
 /// (Replace adobeconnect with the name of your module and remove this line)
@@ -20,24 +19,32 @@ $id = optional_param('id', 0, PARAM_INT); // course_module ID, or
 $a  = optional_param('a', 0, PARAM_INT);  // adobeconnect instance ID
 $groupid = optional_param('group', 0, PARAM_INT);
 
+global $CFG, $USER, $DB, $PAGE, $OUTPUT;
+
 if ($id) {
     if (! $cm = get_coursemodule_from_id('adobeconnect', $id)) {
         error('Course Module ID was incorrect');
     }
 
-    if (! $course = get_record('course', 'id', $cm->course)) {
+    $cond = array('id' => $cm->course);
+    if (! $course = $DB->get_record('course', $cond)) {
         error('Course is misconfigured');
     }
 
-    if (! $adobeconnect = get_record('adobeconnect', 'id', $cm->instance)) {
+    $cond = array('id' => $cm->instance);
+    if (! $adobeconnect = $DB->get_record('adobeconnect', $cond)) {
         error('Course module is incorrect');
     }
 
 } else if ($a) {
-    if (! $adobeconnect = get_record('adobeconnect', 'id', $a)) {
+
+    $cond = array('id' => $a);
+    if (! $adobeconnect = $DB->get_record('adobeconnect', $cond)) {
         error('Course module is incorrect');
     }
-    if (! $course = get_record('course', 'id', $adobeconnect->course)) {
+
+    $cond = array('id' => $adobeconnect->course);
+    if (! $course = $DB->get_record('course', $cond)) {
         error('Course is misconfigured');
     }
     if (! $cm = get_coursemodule_from_instance('adobeconnect', $adobeconnect->id, $course->id)) {
@@ -50,7 +57,26 @@ if ($id) {
 
 require_login($course, true, $cm);
 
-global $CFG, $USER;
+$context = get_context_instance(CONTEXT_MODULE, $cm->id);
+
+// Check for submitted data
+if (($formdata = data_submitted($CFG->wwwroot . '/mod/adobeconnect/view.php')) && confirm_sesskey()) {
+
+    // Edit participants
+    if (isset($formdata->participants)) {
+
+        $cond = array('shortname' => 'adobeconnectpresenter');
+        $roleid = $DB->get_field('role', 'id', $cond);
+
+        if (!empty($roleid)) {
+            redirect("participants.php?id=$id&contextid={$context->id}&roleid=$roleid&groupid={$formdata->group}", '', 0);
+        } else {
+            $message = get_string('nopresenterrole', 'adobeconnect');
+            $OUTPUT->notification($message);
+        }
+    }
+}
+
 
 // Check if the user's email is the Connect Pro user's login
 $usrobj = new stdClass();
@@ -61,35 +87,38 @@ if (isset($CFG->adobeconnect_email_login) and !empty($CFG->adobeconnect_email_lo
 }
 
 /// Print the page header
+$url = new moodle_url('/mod/adobeconnect/view.php', array('id' => $cm->id));
+if ($groupid) {
+    $url->param('group', $groupid);
+}
+
+$PAGE->set_url($url);
+$PAGE->set_context($context);
+$PAGE->set_title(format_string($adobeconnect->name));
+$PAGE->set_heading($course->fullname);
+
+echo $OUTPUT->header();
+
 $stradobeconnects = get_string('modulenameplural', 'adobeconnect');
 $stradobeconnect  = get_string('modulename', 'adobeconnect');
 
-$navlinks = array();
-$navlinks[] = array('name' => $stradobeconnects, 'link' => "index.php?id=$course->id", 'type' => 'activity');
-$navlinks[] = array('name' => format_string($adobeconnect->name), 'link' => '', 'type' => 'activityinstance');
-
-$navigation = build_navigation($navlinks);
-
-print_header_simple(format_string($adobeconnect->name), '', $navigation, '', '', true,
-              update_module_button($cm->id, $course->id, $stradobeconnect), navmenu($course, $cm));
-
-// Check for empy group id, if empty check if this user belongs to any
+// Check for empty group id, if empty check if this user belongs to any
 // group in the course and set the first group found as the default.
 // This is required for the groups selection drop down box and for the
 // initial display of the meeting details.
-
 if (0 != $cm->groupmode){
     if (empty($groupid)) {
         $groups = groups_get_user_groups($course->id, $usrobj->id);
-
         if (array_key_exists(0, $groups)) {
             $groupid = current($groups[0]);
         }
 
         if (empty($groupid)) {
+
             $groupid = 0;
-            notify(get_string('usergrouprequired', 'adobeconnect'));
-            print_footer($course);
+            $message = get_string('usergrouprequired', 'adobeconnect');
+            echo $OUTPUT->notification($message);
+            echo $OUTPUT->footer();
             die();
         }
     }
@@ -101,11 +130,12 @@ if (0 != $cm->groupmode){
 $usrgroups = groups_get_user_groups($cm->course, $usrobj->id);
 $usrgroups = $usrgroups[0]; // Just want groups and not groupings
 
-$sql = "SELECT meetingscoid FROM {$CFG->prefix}adobeconnect_meeting_groups amg WHERE ".
-       "amg.instanceid = {$cm->instance}";
+$params = array('instanceid' => $cm->instance);
+$sql = "SELECT meetingscoid FROM {adobeconnect_meeting_groups} amg WHERE ".
+       "amg.instanceid = :instanceid";
 
 
-$meetscoids = get_records_sql($sql);
+$meetscoids = $DB->get_records_sql($sql, $params);
 $recording = array();
 
 if (!empty($meetscoids)) {
@@ -154,8 +184,9 @@ if (!empty($meetscoids)) {
         if (!empty($data2)) {
              $recording[] = $data2;
         }
-//        print_object(aconnect_get_recordings($aconnect, $fldid, $scoid->meetingscoid));
+
     }
+
 
     // Clean up any duplciated meeting recordings.  Duplicated meeting recordings happen when a the
     // recording settings on ACP server change between publishing the recording links in meeting folders and
@@ -198,7 +229,7 @@ if (!empty($meetscoids)) {
     // Check the user's capability and assign them view permissions to the recordings folder
     // if it's a public meeting give them permissions regardless
     if ($cm->groupmode) {
-        $context = get_context_instance(CONTEXT_MODULE, $id);
+
 
         if (has_capability('mod/adobeconnect:meetingpresenter', $context, $usrobj->id) or
             has_capability('mod/adobeconnect:meetingparticipant', $context, $usrobj->id)) {
@@ -222,58 +253,38 @@ if (!empty($meetscoids)) {
 
 // Log in the current user
 $login = $usrobj->username;
-//$password  = $usrobj->username;
+$password  = $usrobj->username;
 $https = false;
 
 if (isset($CFG->adobeconnect_https) and (!empty($CFG->adobeconnect_https))) {
     $https = true;
 }
 
-
 $aconnect = new connect_class_dom($CFG->adobeconnect_host, $CFG->adobeconnect_port,
                                   '', '', '', $https);
+
 $aconnect->request_http_header_login(1, $login);
 $adobesession = $aconnect->get_cookie();
 
-if (($formdata = data_submitted($CFG->wwwroot . '/mod/adobeconnect/view.php')) && confirm_sesskey()) {
-
-    // Edit participants
-    if (isset($formdata->participants)) {
-        $context = get_context_instance(CONTEXT_MODULE, $id);
-        // Using course context because we want the assign page to use that context
-        // Otherwise the user would have to re-assign users for every activity instance
-        //$context = get_context_instance(CONTEXT_COURSE, $course->id);
-
-        $roleid = get_field('role', 'id', 'shortname', 'adobeconnectpresenter');
-
-        if (!empty($roleid)) {
-            redirect("assign.php?id=$id&amp;contextid={$context->id}&amp;roleid=$roleid&amp;groupid={$formdata->group}", '', 0);
-        } else {
-            notice(get_string('nopresenterrole', 'adobeconnect'));
-        }
-    }
-
-    // Edit participants
-    if (isset($formdata->viewcontent)) {
-        redirect("viewcontent.php?id=$id&amp;groupid=$groupid", '', 0);
-    }
-}
-
 if ($cm->groupmode) {
+    // Not sure if this is needed anymore...
     groups_print_course_menu($course, "view.php?id=$id");
 }
 
 $aconnect = aconnect_login();
 
 // Get the Meeting details
-$scoid = get_field('adobeconnect_meeting_groups', 'meetingscoid', 'instanceid', $adobeconnect->id, 'groupid', $groupid);
+$cond = array('instanceid' => $adobeconnect->id, 'groupid' => $groupid);
+$scoid = $DB->get_field('adobeconnect_meeting_groups', 'meetingscoid', $cond);
+
 $meetfldscoid = aconnect_get_folder($aconnect, 'meetings');
 $filter = array('filter-sco-id' => $scoid);
 
 if (($meeting = aconnect_meeting_exists($aconnect, $meetfldscoid, $filter))) {
     $meeting = current($meeting);
 } else {
-    notice(get_string('nomeeting', 'adobeconnect'), '', $course);
+    $message = get_string('nomeeting', 'adobeconnect');
+    $OUTPUT->notification($message);
     aconnect_logout($aconnect);
     die();
 }
@@ -281,41 +292,16 @@ if (($meeting = aconnect_meeting_exists($aconnect, $meetfldscoid, $filter))) {
 
 aconnect_logout($aconnect);
 
-$context = get_context_instance(CONTEXT_MODULE, $cm->id);
-
 $sesskey = !empty($usrobj->sesskey) ? $usrobj->sesskey : '';
 
-echo '<br /><br />';
-echo '<form name="meetingdetail" action="' . $CFG->wwwroot . '/mod/adobeconnect/view.php" method="post">' . "\n";
+$renderer = $PAGE->get_renderer('mod_adobeconnect');
 
-// print meeting detail field set
-echo '<div id="aconfldset1" class="aconfldset">'."\n";
-echo '<fieldset>'."\n";
+$meetingdetail = new stdClass();
+$meetingdetail->name = $meeting->name;
 
-echo '<legend>'.get_string('meetinginfo', 'adobeconnect').'</legend>'."\n";
-
-echo '<div class="aconmeetinforow">'."\n";
-
-echo '<div class="aconlabeltitle" id="aconmeetnametitle">'."\n";
-echo '<label for="lblmeetingnametitle">'.get_string('meetingname', 'adobeconnect').':</label>'."\n";
-echo '</div>'."\n";
-
-echo '<div class="aconlabeltext" id="aconmeetnametxt">'."\n";
-echo '<label for="lblmeetingname">'.format_string($meeting->name).'</label><br />'."\n";
-echo '</div>'."\n";
-
-echo '</div>'."\n";
-
+// Determine if the Meeting URL is to appear
 if (has_capability('mod/adobeconnect:meetingpresenter', $context) or
     has_capability('mod/adobeconnect:meetinghost', $context)) {
-
-    // Get HTTPS setting
-    $https      = false;
-    $protocol   = 'http://';
-    if (isset($CFG->adobeconnect_https) and (!empty($CFG->adobeconnect_https))) {
-        $https      = true;
-        $protocol   = 'https://';
-    }
 
     // Include the port number only if it is a port other than 80
     $port = '';
@@ -324,123 +310,59 @@ if (has_capability('mod/adobeconnect:meetingpresenter', $context) or
         $port = ':' . $CFG->adobeconnect_port;
     }
 
+    $protocol = 'http://';
+
+    if ($https) {
+        $protocol = 'https://';
+    }
+
     $url = $protocol . $CFG->adobeconnect_meethost . $port
            . $meeting->url;
-    echo '<div class="aconmeetinforow">'."\n";
 
-    echo '<div class="aconlabeltitle" id="aconmeeturltitle">'."\n";
-    echo '<label for="lblmeetingurltitle">'.get_string('meeturl', 'adobeconnect').':</label>'."\n";
-    echo '</div>'."\n";
+    $meetingdetail->url = $url;
 
-    echo '<div class="aconlabeltext" id="aconmeeturltext">'."\n";
-    echo '<label for="lblmeetingurl">'.$url.'</label><br />'."\n";
-    echo '</div>'."\n";
-
-    echo '</div>'."\n";
-
-    echo '<div class="aconmeetinforow">'."\n";
-
-    echo '<div class="aconlabeltitle" id="aconmeetinfotitle">'."\n";
-    echo '<label for="lblmeetinginfotitle">'.get_string('meetinfo', 'adobeconnect').':</label>'."\n";
-    echo '</div>'."\n";
 
     $url = $protocol.$CFG->adobeconnect_meethost.$port.'/admin/meeting/sco/info?principal-id='.
            $usrprincipal.'&amp;sco-id='.$scoid.'&amp;session='.$adobesession;
-    echo '<div class="aconlabeltext" id="aconmeetinfotext">'."\n";
-    echo '<a href="'. $url . '" target="_blank">'. get_string('meetinfotxt', 'adobeconnect') . '</a><br />'."\n";
-    echo '</div>'."\n";
 
-    echo '</div>'."\n";
+    // Get the server meeting details link
+    $meetingdetail->servermeetinginfo = $url;
 
-//    echo '<div class="aconbtninfo">'."\n";
-//    echo button_to_popup_window('www.google.ca',
-//                                'btnname', get_string('joinmeeting', 'adobeconnect'), 900, 900, null, null, true);
-//    echo '</div>'."\n";
-
-//$port = '';
-//    echo '<div class="aconbtninfo">'."\n";
-//    $infourl= $protocol.$CFG->adobeconnect_meethost.$port.'/admin/meeting/sco/info?principal-id='.
-//            $usrprincipal.'&amp;sco-id='.$scoid.'&amp;session='.$adobesession;
-//    echo '<input type="button" name="info" value="'.get_string('meetinginfo', 'adobeconnect').
-//        '" onClick="window.open(\''.$infourl.'\',\'meetinginfo\',\'dependent=no\'); return false;">';
-//    echo '</div>'."\n";
-
-
-
-//---------
-
-
+} else {
+    $meetingdetail->url = '';
+    $meetingdetail->servermeetinginfo = '';
 }
 
-echo '<div class="aconmeetinforow">'."\n";
-
-echo '<div class="aconlabeltitle" id="aconmeetstarttitle">'."\n";
-echo '<label for="lblmeetingstarttitle">'.get_string('meetingstart', 'adobeconnect').':</label>'."\n";
-echo '</div>'."\n";
-
-//  CONTRIB-2929 - remove date format and let Moodle decide the format
-$time = userdate($adobeconnect->starttime);
-echo '<div class="aconlabeltext" id="aconmeetstarttxt">'."\n";
-echo '<label for="lblmeetingstart">'.$time.'</label><br />'."\n";
-echo '</div>'."\n";
-
-echo '</div>'."\n";
-
-echo '<div class="aconmeetinforow">'."\n";
-
-echo '<div class="aconlabeltitle" id="aconmeetendtitle">'."\n";
-echo '<label for="lblmeetingendtitle">'.get_string('meetingend', 'adobeconnect').':</label>'."\n";
-echo '</div>'."\n";
-
-$time = userdate($adobeconnect->endtime);
-echo '<div class="aconlabeltext" id="aconmeetendtxt">'."\n";
-echo '<label for="lblmeetingend">'.$time.'</label><br />'."\n";
-echo '</div>'."\n";
-
-echo '</div>'."\n";
-
-echo '<div class="aconmeetinforow">'."\n";
-
-echo '<div class="aconlabeltitle" id="aconmeetsummarytitle">'."\n";
-echo '<label for="lblmeetingsummarytitle">'.get_string('meetingintro', 'adobeconnect').':</label>'."\n";
-echo '</div>'."\n";
-
-echo '<div class="aconlabeltext" id="aconmeetsummarytxt">'."\n";
-echo '<label for="lblmeetingsummary">'. format_string($adobeconnect->intro) .'</label><br />'."\n";
-echo '</div>'."\n";
-
-echo '</div>'."\n";
-
-echo '</fieldset>'."\n";
-echo '</div>'."\n";
-
-echo '<br />';
-
-echo '<div class="aconbtnrow">'."\n";
-
-echo '<div class="aconbtnjoin">'."\n";
-echo button_to_popup_window('/mod/adobeconnect/join.php?id='.$id.'&amp;sesskey='.$sesskey.'&amp;groupid='.$groupid,
-                            'btnname', get_string('joinmeeting', 'adobeconnect'), 900, 900, null, null, true);
-echo '</div>'."\n";
+// Determine if the user has the permissions to assign perticipants
+$meetingdetail->participants = false;
 
 if (has_capability('mod/adobeconnect:meetingpresenter', $context, $usrobj->id) or
     has_capability('mod/adobeconnect:meetinghost', $context, $usrobj->id)){
-    echo '<div class="aconbtnroles">'."\n";
-    echo '<input type="submit" name="participants" value="'.get_string('selectparticipants', 'adobeconnect').'">';
-    echo '</div>'."\n";
 
+    $meetingdetail->participants = true;
 }
 
-echo '</div>'."\n";
+//  CONTRIB-2929 - remove date format and let Moodle decide the format
+// Get the meeting start time
+$time = userdate($adobeconnect->starttime);
+$meetingdetail->starttime = $time;
 
-echo '<input type="hidden" name="id" value="'.$id.'">'."\n";
-echo '<input type="hidden" name="group" value="'.$groupid.'">'."\n";
-echo '<input type="hidden" name="sesskey" value="'.$sesskey.'">'."\n";
+// Get the meeting end time
+$time = userdate($adobeconnect->endtime);
+$meetingdetail->endtime = $time;
 
-echo '</form>'."\n";
+// Get the meeting intro text
+$meetingdetail->intro = $adobeconnect->intro;
+$meetingdetail->introformat = $adobeconnect->introformat;
+
+echo $OUTPUT->box_start('generalbox', 'meetingsummary');
+
+// Echo the rendered HTML to the page
+echo $renderer->display_meeting_detail($meetingdetail, $id, $groupid);
+
+echo $OUTPUT->box_end();
 
 echo '<br />';
-
 
 $showrecordings = false;
 // Check if meeting is private, if so check the user's capability.  If public show recorded meetings
@@ -456,37 +378,16 @@ if (!$adobeconnect->meetingpublic) {
 $recordings = $recording;
 
 if ($showrecordings and !empty($recordings)) {
+    echo $OUTPUT->box_start('generalbox', 'meetingsummary');
 
-    echo '<div id="aconfldset2" class="aconfldset">'."\n";
-    echo '<fieldset>'."\n";
-    echo '<legend>'.get_string('recordinghdr', 'adobeconnect').'</legend>'."\n";
+    // Echo the rendered HTML to the page
+    echo $renderer->display_meeting_recording($recordings, $cm->id, $groupid, $adobesession);
 
-    echo '<div class="aconrecording">'."\n";
-    foreach ($recordings as $key => $recordinggrp) {
-
-        if (!empty($recordinggrp)) {
-
-            foreach($recordinggrp as $recording_scoid => $recording) {
-
-                echo '<div class="aconrecordingrow">'."\n";
-                echo '<a href="joinrecording.php?id=' . $id. '&recording='. $recording_scoid .
-                     '&groupid=' . $groupid . '&sesskey=' . $USER->sesskey .
-                     '" target="_blank">'. format_string($recording->name) .'</a><br />';
-                echo '</div>'."\n";
-
-            }
-        }
-    }
-    echo '</div>'."\n";
-
-    echo '</fieldset>'."\n";
-    echo '</div>'."\n";
+    echo $OUTPUT->box_end();
 }
 
 add_to_log($course->id, 'adobeconnect', 'view',
            "view.php?id=$cm->id", "View {$adobeconnect->name} details", $cm->id);
 
 /// Finish the page
-print_footer($course);
-
-?>
+echo $OUTPUT->footer();

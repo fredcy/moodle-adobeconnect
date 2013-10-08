@@ -1,4 +1,12 @@
-<?php // $Id: locallib.php,v 1.1.2.14 2011/08/04 14:12:05 adelamarre Exp $
+<?php
+
+/**
+ * @package mod
+ * @subpackage adobeconnect
+ * @author Akinsaya Delamarre (adelamarre@remote-learner.net)
+ * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ */
+
 require_once('connect_class.php');
 require_once('connect_class_dom.php');
 
@@ -335,12 +343,13 @@ function aconnect_login() {
         $https = true;
     }
 
+
     $aconnect = new connect_class_dom($CFG->adobeconnect_host,
-                                  $CFG->adobeconnect_port,
-                                  $CFG->adobeconnect_admin_login,
-                                  $CFG->adobeconnect_admin_password,
-                                  '',
-                                  $https);
+                                      $CFG->adobeconnect_port,
+                                      $CFG->adobeconnect_admin_login,
+                                      $CFG->adobeconnect_admin_password,
+                                      '',
+                                      $https);
 
     $params = array(
         'action' => 'common-info'
@@ -563,20 +572,16 @@ function aconnect_return_all_templates($xml) {
  * @param obj $aconnect a connect_class object
  * @param int $folderscoid the recordings folder sco-id
  * @param int $sourcescoid the meeting sco-id
- * @param int $filterscoid filter on a specific sco-id.
  *
  * @return mixed array an array of object with the recording sco-id
  * as the key and the recording properties as properties
  */
-function aconnect_get_recordings($aconnect, $folderscoid, $sourcescoid, $filterscoid = '') {
-
+function aconnect_get_recordings($aconnect, $folderscoid, $sourcescoid) {
     $params = array('action' => 'sco-contents',
                     'sco-id' => $folderscoid,
+                    //'filter-source-sco-id' => $sourcescoid,
                     'sort-name' => 'asc',
                     );
-    if (!empty($filterscoid)) {
-        $params['filter-sco-id'] = $filterscoid;
-    }
 
     // Check if meeting scoid and folder scoid are the same
     // If hey are the same then that means that forced recordings is not
@@ -593,7 +598,6 @@ function aconnect_get_recordings($aconnect, $folderscoid, $sourcescoid, $filters
     $recordings = array();
 
     if ($aconnect->call_success()) {
-
         $dom = new DomDocument();
         $dom->loadXML($aconnect->_xmlresponse);
 
@@ -1226,137 +1230,112 @@ function aconnect_move_to_shared($aconnect, $scolist) {
 }
 
 /**
- * Helper function:
- * Returns an array with the currently set HTTP protocol
+ * Gets a list of roles that this user can assign in this context
  *
- * @param none
- * @return array - string $protocol (http:// or https://),  boolean $https
+ * @param object $context the context.
+ * @param int $rolenamedisplay the type of role name to display. One of the
+ *      ROLENAME_X constants. Default ROLENAME_ALIAS.
+ * @param bool $withusercounts if true, count the number of users with each role.
+ * @param integer|object $user A user id or object. By default (null) checks the permissions of the current user.
+ * @return array if $withusercounts is false, then an array $roleid => $rolename.
+ *      if $withusercounts is true, returns a list of three arrays,
+ *      $rolenames, $rolecounts, and $nameswithcounts.
  */
-function get_protocol() {
-    global $CFG;
+function adobeconnect_get_assignable_roles($context, $rolenamedisplay = ROLENAME_ALIAS, $withusercounts = false, $user = null) {
+    global $USER, $DB;
 
-    $protocol = 'http://';
-    $https = false;
-
-    if (isset($CFG->adobeconnect_https) and (!empty($CFG->adobeconnect_https))) {
-
-        $protocol = 'https://';
-        $https = true;
-    }
-
-    return array($protocol, $https);
-}
-
-/**
- * Helper function:
- * Login a moodle user into the Connect Pro server.  Will return either the
- * entire connection class object or only return the connection session value
- *
- * @param string $username - the moodle username
- * @param boolean $return_session - true to return only the connection session
- * or false to return the entire connection class object
- */
-function login_moodle_user($username, $return_session = true) {
-    global $CFG;
-
-    $protocol   = '';
-    $https      = '';
-
-    list($protocol, $https) = get_protocol();
-
-    $aconnect = new connect_class_dom($CFG->adobeconnect_host, $CFG->adobeconnect_port,
-                                      '', '', '', $https);
-    $aconnect->request_http_header_login(1, $username);
-
-    if ($return_session) {
-        return $aconnect->get_cookie();
+    // make sure there is a real user specified
+    if ($user === null) {
+        $userid = !empty($USER->id) ? $USER->id : 0;
     } else {
-        return $aconnect;
+        $userid = !empty($user->id) ? $user->id : $user;
     }
 
-}
+    if (!has_capability('moodle/role:assign', $context, $userid)) {
+        if ($withusercounts) {
+            return array(array(), array(), array());
+        } else {
+            return array();
+        }
+    }
 
-/**
- * This function is primarily used for debugging.  Do not use if you don't know
- * what you are doing
- */
-function make_api_call($aconnect, $params = array()) {
-    $aconnect->create_request($params);
+    $parents = get_parent_contexts($context, true);
+    $contexts = implode(',' , $parents);
 
-    if ($aconnect->call_success()) {
-        return $aconnect;
+    $params = array();
+    $extrafields = '';
+    if ($rolenamedisplay == ROLENAME_ORIGINALANDSHORT or $rolenamedisplay == ROLENAME_SHORT) {
+        $extrafields .= ', r.shortname';
+    }
+
+    if ($withusercounts) {
+        $extrafields = ', (SELECT count(u.id)
+                             FROM {role_assignments} cra JOIN {user} u ON cra.userid = u.id
+                            WHERE cra.roleid = r.id AND cra.contextid = :conid AND u.deleted = 0
+                          ) AS usercount';
+        $params['conid'] = $context->id;
+    }
+
+    if (is_siteadmin($userid)) {
+        // show all roles allowed in this context to admins
+        $assignrestriction = "";
     } else {
-        return false;
+        $assignrestriction = "JOIN (SELECT DISTINCT raa.allowassign AS id
+                                      FROM {role_allow_assign} raa
+                                      JOIN {role_assignments} ra ON ra.roleid = raa.roleid
+                                     WHERE ra.userid = :userid AND ra.contextid IN ($contexts)
+                                   ) ar ON ar.id = r.id";
+        $params['userid'] = $userid;
     }
-}
+    $params['contextlevel'] = $context->contextlevel;
+    $sql = "SELECT r.id, r.name $extrafields
+              FROM {role} r
+              $assignrestriction
+              JOIN {role_context_levels} rcl ON r.id = rcl.roleid
+             WHERE rcl.contextlevel = :contextlevel
+          ORDER BY r.sortorder ASC";
+    $roles = $DB->get_records_sql($sql, $params);
 
-//function get_nonparticipant_users($instanceid, $courseid, $groupid = 0) {
-//    global $CFG;
-//
-//    $context = get_context_instance(CONTEXT_COURSE, $courseid);
-//    $roles = get_roles_with_capability('moodle/legacy:student', CAP_ALLOW, $context);
-//    $users = array();
-//
-//    if (empty($roles)) {
-//        return array();
-//    }
-//
-//    $role = current($roles);
-//
-//    if ($groupid) {
-//      $users = get_role_users($role->id, $context, false, 'u.id,u.firstname,u.lastname,u.username,u.email', 'u.lastname ASC', true, $groupid);
-//    } else { // GET USER
-//      $users = get_role_users($role->id, $context, false, 'u.id,u.firstname,u.lastname,u.username,u.email', 'u.lastname ASC');
-//    }
-//
-//    if (empty($users) ) {
-//        $users = array();
-//    }
-//
-//    $sql = "SELECT amu.userid, amu.roleid FROM ".
-//           "{$CFG->prefix}adobeconnect_meeting_users amu JOIN ".
-//           "{$CFG->prefix}adobeconnect_meeting_groups amg ".
-//           "ON amu.meetgroupid = amg.id WHERE ".
-//           " amg.instanceid = $instanceid AND amg.groupid = $groupid";
-//
-//    $participants = get_records_sql($sql);
-//
-//    if (empty($participants)) {
-//        $participants = array();
-//    }
-//
-//    foreach($users as $key => $user) {
-//        foreach($participants as $participant) {
-//            if ($user->id == $participant->userid) {
-//                unset($users[$key]);
-//            }
-//        }
-//    }
-//
-//    return $users;
-//}
-//
-//function get_participant_users($instanceid, $groupid) {
-//    global $CFG;
-//
-//    $participants = array();
-//
-//
-//    $sql = "SELECT amu.userid, amu.roleid, u.firstname, u.lastname, u.username, u.email FROM ".
-//           "{$CFG->prefix}adobeconnect_meeting_users amu JOIN ".
-//           "{$CFG->prefix}user u ON u.id = amu.userid JOIN ".
-//           "{$CFG->prefix}adobeconnect_meeting_groups amg ON ".
-//           " amg.id = amu.meetgroupid WHERE ".
-//           " amg.instanceid = $instanceid AND amg.groupid = $groupid".
-//           " AND u.deleted = 0 ORDER BY u.lastname ASC";
-//
-//
-//    $participants = get_records_sql($sql);
-//
-//    if (empty($participants)) {
-//        $participants = array();
-//    }
-//
-//    return $participants;
-//}
-?>
+    // Only include Adobe Connect roles
+    $param = array('shortname' => 'adobeconnectpresenter');
+    $presenterid    = $DB->get_field('role', 'id', $param);
+
+    $param = array('shortname' => 'adobeconnectparticipant');
+    $participantid  = $DB->get_field('role', 'id', $param);
+
+    $param = array('shortname' => 'adobeconnecthost');
+    $hostid         = $DB->get_field('role', 'id', $param);
+
+    foreach ($roles as $key => $data) {
+        if ($key != $participantid and $key != $presenterid and $key != $hostid) {
+            unset($roles[$key]);
+        }
+    }
+
+    $rolenames = array();
+    foreach ($roles as $role) {
+        if ($rolenamedisplay == ROLENAME_SHORT) {
+            $rolenames[$role->id] = $role->shortname;
+            continue;
+        }
+        $rolenames[$role->id] = $role->name;
+        if ($rolenamedisplay == ROLENAME_ORIGINALANDSHORT) {
+            $rolenames[$role->id] .= ' (' . $role->shortname . ')';
+        }
+    }
+    if ($rolenamedisplay != ROLENAME_ORIGINALANDSHORT and $rolenamedisplay != ROLENAME_SHORT) {
+        $rolenames = role_fix_names($rolenames, $context, $rolenamedisplay);
+    }
+
+    if (!$withusercounts) {
+        return $rolenames;
+    }
+
+    $rolecounts = array();
+    $nameswithcounts = array();
+    foreach ($roles as $role) {
+        $nameswithcounts[$role->id] = $rolenames[$role->id] . ' (' . $roles[$role->id]->usercount . ')';
+        $rolecounts[$role->id] = $roles[$role->id]->usercount;
+    }
+    return array($rolenames, $rolecounts, $nameswithcounts);
+}
